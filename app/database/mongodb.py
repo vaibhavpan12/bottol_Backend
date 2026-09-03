@@ -19,3 +19,8 @@ db = client["pivora"]
 products_collection = db["products"]
 orders_collection = db["orders"]
 users_collection = db["users"]
+carts_collection = db["carts"]
+carts_collection.create_index(
+    "user_id",
+    unique=True
+)

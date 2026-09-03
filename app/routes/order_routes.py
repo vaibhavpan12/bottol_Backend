@@ -19,7 +19,7 @@ def create_new_order(order: OrderCreate):
 
 
 # Get user's order history
-@router.get("AllOrder/user/{user_id}")
+@router.get("/AllOrder/user/{user_id}")
 def get_user_orders(user_id: str):
 
     orders = list(
@@ -38,7 +38,7 @@ def get_user_orders(user_id: str):
 
 
 # Get single order
-@router.get("SingleOrder/{order_id}")
+@router.get("/SingleOrder/{order_id}")
 def get_order(order_id: str):
 
     order = orders_collection.find_one(
