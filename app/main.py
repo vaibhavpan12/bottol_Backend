@@ -8,7 +8,7 @@ from app.routes.product_routes import router as product_router
 from app.routes.order_routes import router as order_router
 from app.routes.user_routes import router as user_router
 from app.routes.cart_routes import router as cart_router
-
+from app.routes.ai_routes import router as ai_router
 
 app = FastAPI(
     title="Pivora API",
@@ -64,7 +64,7 @@ app.include_router(product_router)
 app.include_router(order_router)
 app.include_router(user_router)
 app.include_router(cart_router)
-
+app.include_router(ai_router)
 
 @app.get("/")
 def root():
