@@ -4,25 +4,22 @@ from app.database.mongodb import products_collection
 def search_products(
     query: str = "",
     category: str = "",
+    use_case: str = "",
+    preference: str = "",
+    material: str = "",
+    capacity: str = "",
     max_price: float | None = None,
     limit: int = 5
 ):
     filters = {}
 
     # -------------------------------------------------
-    # PRODUCT SEARCH
+    # TEXT SEARCH
     # -------------------------------------------------
-    # Search query in BOTH:
-    # 1. product name
-    # 2. product category
+    # Search product name/category
     #
     # Example:
     # query = "bottle"
-    #
-    # It can match:
-    # name = "Water Bottle"
-    # OR
-    # category = "Daily Bottles"
     # -------------------------------------------------
 
     if query:
@@ -52,6 +49,69 @@ def search_products(
         }
 
     # -------------------------------------------------
+    # USE CASE FILTER
+    # -------------------------------------------------
+    # Example:
+    # use_case = "gym"
+    #
+    # MongoDB checks:
+    # use_cases = ["gym", "office", "travel"]
+    # -------------------------------------------------
+
+    if use_case:
+        filters["use_cases"] = {
+            "$regex": use_case,
+            "$options": "i"
+        }
+
+    # -------------------------------------------------
+    # PREFERENCE FILTER
+    # -------------------------------------------------
+    # Example:
+    # preference = "lightweight"
+    #
+    # Searches:
+    # weight
+    # features
+    # -------------------------------------------------
+
+    if preference:
+        filters["$or"] = [
+            {
+                "weight": {
+                    "$regex": preference,
+                    "$options": "i"
+                }
+            },
+            {
+                "features": {
+                    "$regex": preference,
+                    "$options": "i"
+                }
+            }
+        ]
+
+    # -------------------------------------------------
+    # MATERIAL FILTER
+    # -------------------------------------------------
+
+    if material:
+        filters["material"] = {
+            "$regex": material,
+            "$options": "i"
+        }
+
+    # -------------------------------------------------
+    # CAPACITY FILTER
+    # -------------------------------------------------
+
+    if capacity:
+        filters["capacity"] = {
+            "$regex": capacity,
+            "$options": "i"
+        }
+
+    # -------------------------------------------------
     # PRICE FILTER
     # -------------------------------------------------
 
@@ -61,7 +121,7 @@ def search_products(
         }
 
     # -------------------------------------------------
-    # FIRST SEARCH
+    # SEARCH DATABASE
     # -------------------------------------------------
 
     products = list(
@@ -73,12 +133,11 @@ def search_products(
     # -------------------------------------------------
     # FALLBACK SEARCH
     # -------------------------------------------------
-    # If AI gives an incorrect category such as
-    # "office", remove the category filter and
-    # search using the actual product information.
+    # If strict search gives no result,
+    # remove requirement filters and try basic search.
     # -------------------------------------------------
 
-    if not products and category:
+    if not products:
 
         fallback_filters = {}
 
@@ -125,6 +184,13 @@ def search_products(
             "quantity": product.get("quantity"),
             "trending": product.get("trending"),
             "image": product.get("image"),
+
+            # AI recommendation information
+            "material": product.get("material"),
+            "capacity": product.get("capacity"),
+            "weight": product.get("weight"),
+            "use_cases": product.get("use_cases", []),
+            "features": product.get("features", [])
         })
 
     return result

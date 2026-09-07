@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import requests
 import re
+
 from app.ai.product_tools import search_products
 
 
@@ -22,30 +23,48 @@ class AgentRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
 
+
+# =========================================================
+# SIMPLE PRODUCT QUERY DETECTOR
+# =========================================================
+
 def detect_simple_product_query(message: str):
     """
     Detect simple shopping queries without using Llama.
 
     Examples:
-    - bottle under 1500
-    - bottles below 1000
-    - tumbler under 2000
+
+    bottle under 1500
+    bottles below 1000
+    tumbler under 2000
+    flask under 1200
     """
 
     text = message.lower().strip()
 
-    # Price detect
+    # -----------------------------------------------------
+    # PRICE DETECTION
+    # -----------------------------------------------------
+
     price_match = re.search(
-        r"(?:under|below|less than|upto|up to|within)\s*(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)",
+        r"(?:under|below|less than|upto|up to|within)"
+        r"\s*(?:₹|rs\.?|inr)?"
+        r"\s*(\d+(?:\.\d+)?)",
         text
     )
 
     max_price = None
 
     if price_match:
-        max_price = float(price_match.group(1))
+        max_price = float(
+            price_match.group(1)
+        )
 
-    # Product keyword detect
+
+    # -----------------------------------------------------
+    # PRODUCT KEYWORD DETECTION
+    # -----------------------------------------------------
+
     product_keywords = [
         "bottle",
         "bottles",
@@ -58,18 +77,29 @@ def detect_simple_product_query(message: str):
     query = ""
 
     for keyword in product_keywords:
+
         if keyword in text:
+
             query = keyword.rstrip("s")
+
             break
 
-    # Simple query tabhi maanenge jab product keyword mile
+
+    # Product keyword nahi mila
     if not query:
         return None
+
+
+    # -----------------------------------------------------
+    # Return detected information
+    # -----------------------------------------------------
 
     return {
         "query": query,
         "max_price": max_price
     }
+
+
 # =========================================================
 # NORMAL AI CHAT
 # =========================================================
@@ -78,22 +108,31 @@ def detect_simple_product_query(message: str):
 def chat_with_ai(request: ChatRequest):
 
     try:
+
         response = requests.post(
+
             "http://localhost:11434/api/chat",
+
             json={
+
                 "model": "llama3.2:3b",
 
                 "messages": [
+
                     {
                         "role": "system",
+
                         "content": (
                             "You are Pivora AI, a helpful shopping "
                             "assistant for a bottle e-commerce store. "
+
                             "Be concise and helpful. "
+
                             "Do not invent product names, prices, "
                             "stock, or product details."
                         )
                     },
+
                     {
                         "role": "user",
                         "content": request.message
@@ -106,18 +145,26 @@ def chat_with_ai(request: ChatRequest):
             timeout=120
         )
 
+
         if not response.ok:
+
             raise HTTPException(
                 status_code=500,
                 detail="Ollama request failed"
             )
 
+
         data = response.json()
 
+
         return {
+
             "success": True,
+
             "message": data["message"]["content"]
+
         }
+
 
     except requests.exceptions.RequestException as error:
 
@@ -139,13 +186,11 @@ def ai_agent(request: AgentRequest):
     # =====================================================
     # FAST PATH
     # =====================================================
-    # Simple product query -> Llama ko call nahi karna
-    # Direct MongoDB search
-    # =====================================================
 
     simple_query = detect_simple_product_query(
         request.message
     )
+
 
     if simple_query:
 
@@ -155,83 +200,186 @@ def ai_agent(request: AgentRequest):
         print("QUERY:", simple_query)
         print("================================")
 
+
         products = search_products(
+
             query=simple_query["query"],
+
             max_price=simple_query["max_price"]
+
         )
+
 
         if not products:
 
             return {
+
                 "success": True,
+
                 "message": (
                     "Sorry, I couldn't find any products "
                     "matching your requirements."
                 ),
+
                 "products": []
+
             }
 
+
         return {
+
             "success": True,
+
             "message": (
                 f"I found {len(products)} "
                 "products matching your requirements."
             ),
+
             "products": products
+
         }
+
 
     # =====================================================
     # NORMAL AI AGENT
     # =====================================================
 
-    # ... existing code continues here
-    # -----------------------------------------------------
-    # TOOL DEFINITION
-    # -----------------------------------------------------
-
     tools = [
+
         {
+
             "type": "function",
 
             "function": {
+
                 "name": "search_products",
 
                 "description": (
-                    "Search real Pivora products from the database "
-                    "using product name, category and maximum price. "
+                    "Search real Pivora products from the "
+                    "MongoDB product database. "
 
-                    "Only use category when the user explicitly "
-                    "mentions a product category. "
+                    "Use this tool whenever the user is looking "
+                    "for products or gives product requirements. "
 
-                    "Do NOT treat use cases such as office, gym, "
-                    "travel, school or home as product categories."
+                    "You can search by product type, category, "
+                    "use case, preference, material, capacity "
+                    "and maximum price. "
+
+                    "Never invent product information. "
+
+                    "Office, gym, travel, school and home are "
+                    "use cases, NOT product categories."
                 ),
 
                 "parameters": {
+
                     "type": "object",
 
                     "properties": {
 
+                        # ---------------------------------
+                        # PRODUCT
+                        # ---------------------------------
+
                         "query": {
+
                             "type": "string",
+
                             "description": (
-                                "Product name or keyword, "
-                                "for example bottle or tumbler."
+                                "Product type or keyword. "
+                                "Examples: bottle, tumbler, flask."
                             )
                         },
+
+
+                        # ---------------------------------
+                        # CATEGORY
+                        # ---------------------------------
 
                         "category": {
+
                             "type": "string",
+
                             "description": (
-                                "Product category only when explicitly "
-                                "mentioned by the user."
+                                "Product category only when "
+                                "explicitly mentioned by the user."
                             )
                         },
 
-                        "max_price": {
-                            "type": "number",
+
+                        # ---------------------------------
+                        # USE CASE
+                        # ---------------------------------
+
+                        "use_case": {
+
+                            "type": "string",
+
                             "description": (
-                                "Maximum price the user wants to spend."
+                                "How the user intends to use "
+                                "the product. Examples: gym, "
+                                "office, travel, school."
+                            )
+                        },
+
+
+                        # ---------------------------------
+                        # PREFERENCE
+                        # ---------------------------------
+
+                        "preference": {
+
+                            "type": "string",
+
+                            "description": (
+                                "Product preference such as "
+                                "lightweight, leak proof, "
+                                "insulated or BPA free."
+                            )
+                        },
+
+
+                        # ---------------------------------
+                        # MATERIAL
+                        # ---------------------------------
+
+                        "material": {
+
+                            "type": "string",
+
+                            "description": (
+                                "Preferred product material. "
+                                "Example: stainless steel."
+                            )
+                        },
+
+
+                        # ---------------------------------
+                        # CAPACITY
+                        # ---------------------------------
+
+                        "capacity": {
+
+                            "type": "string",
+
+                            "description": (
+                                "Preferred product capacity. "
+                                "Examples: 500ml, 750ml, 1 litre."
+                            )
+                        },
+
+
+                        # ---------------------------------
+                        # MAX PRICE
+                        # ---------------------------------
+
+                        "max_price": {
+
+                            "type": "number",
+
+                            "description": (
+                                "Maximum amount the user "
+                                "wants to spend."
                             )
                         }
                     }
@@ -241,53 +389,73 @@ def ai_agent(request: AgentRequest):
     ]
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # INITIAL CONVERSATION
-    # -----------------------------------------------------
+    # =====================================================
 
     messages = [
 
         {
+
             "role": "system",
 
             "content": (
-                "You are Pivora AI, an e-commerce shopping assistant. "
 
-                "You have access to a search_products tool that "
-                "searches the real Pivora MongoDB database. "
+                "You are Pivora AI, an e-commerce shopping "
+                "assistant. "
+
+                "You have access to a search_products tool "
+                "that searches the real Pivora MongoDB database. "
 
                 "Always use the tool when the user asks about "
-                "real products, prices, stock or availability. "
+                "real products, prices, stock, availability "
+                "or product recommendations. "
 
-                "Never invent product names, prices, stock or "
-                "product details. "
+                "Never invent product names, prices, stock "
+                "or product details. "
 
-                "Only provide a category to the tool when the user "
+                "Extract the user's requirements and provide "
+                "them to the search_products tool. "
+
+                "For example, if the user says "
+                "'I need a lightweight bottle for gym under "
+                "1500', use: "
+
+                "query=bottle, "
+                "use_case=gym, "
+                "preference=lightweight, "
+                "max_price=1500. "
+
+                "Only provide a category when the user "
                 "explicitly mentions a product category. "
 
-                "Words such as office, gym, travel, school and home "
-                "describe the user's use case and are NOT categories."
+                "Office, gym, travel, school and home are "
+                "use cases, NOT categories."
             )
         },
 
         {
+
             "role": "user",
+
             "content": request.message
+
         }
     ]
 
 
-    # -----------------------------------------------------
-    # STEP 1
-    # Ask Llama what action is required
-    # -----------------------------------------------------
+    # =====================================================
+    # CALL OLLAMA
+    # =====================================================
 
     try:
 
         response = requests.post(
+
             "http://localhost:11434/api/chat",
 
             json={
+
                 "model": "llama3.2:3b",
 
                 "messages": messages,
@@ -300,6 +468,7 @@ def ai_agent(request: AgentRequest):
             timeout=120
         )
 
+
     except requests.exceptions.RequestException as error:
 
         print("Ollama Error:", error)
@@ -310,12 +479,16 @@ def ai_agent(request: AgentRequest):
         )
 
 
-    # -----------------------------------------------------
-    # STEP 2
-    # Validate Ollama response
-    # -----------------------------------------------------
+    # =====================================================
+    # VALIDATE RESPONSE
+    # =====================================================
 
     if not response.ok:
+
+        print(
+            "Ollama Response:",
+            response.text
+        )
 
         raise HTTPException(
             status_code=500,
@@ -325,7 +498,12 @@ def ai_agent(request: AgentRequest):
 
     data = response.json()
 
-    assistant_message = data["message"]
+
+    assistant_message = data.get(
+        "message",
+        {}
+    )
+
 
     tool_calls = assistant_message.get(
         "tool_calls",
@@ -333,35 +511,39 @@ def ai_agent(request: AgentRequest):
     )
 
 
-    # -----------------------------------------------------
-    # STEP 3
-    # If no tool is required
-    # -----------------------------------------------------
+    # =====================================================
+    # NO TOOL CALL
+    # =====================================================
 
     if not tool_calls:
 
         return {
+
             "success": True,
+
             "message": assistant_message.get(
                 "content",
                 ""
             ),
+
             "products": []
+
         }
 
 
-    # -----------------------------------------------------
-    # STEP 4
-    # Execute tool
-    # -----------------------------------------------------
+    # =====================================================
+    # EXECUTE TOOL
+    # =====================================================
 
     products = []
+
 
     for tool_call in tool_calls:
 
         function_name = tool_call["function"]["name"]
 
         arguments = tool_call["function"]["arguments"]
+
 
         print("================================")
         print("AI TOOL ARGUMENTS:")
@@ -370,7 +552,7 @@ def ai_agent(request: AgentRequest):
 
 
         # -------------------------------------------------
-        # search_products
+        # SEARCH PRODUCTS
         # -------------------------------------------------
 
         if function_name == "search_products":
@@ -387,13 +569,44 @@ def ai_agent(request: AgentRequest):
                     ""
                 ),
 
+                use_case=arguments.get(
+                    "use_case",
+                    ""
+                ),
+
+                preference=arguments.get(
+                    "preference",
+                    ""
+                ),
+
+                material=arguments.get(
+                    "material",
+                    ""
+                ),
+
+                capacity=arguments.get(
+                    "capacity",
+                    ""
+                ),
+
                 max_price=(
-                    float(arguments["max_price"])
-                    if arguments.get("max_price") is not None
+
+                    float(
+                        arguments["max_price"]
+                    )
+
+                    if arguments.get(
+                        "max_price"
+                    ) is not None
+
                     else None
                 )
             )
 
+
+    # =====================================================
+    # DEBUG
+    # =====================================================
 
     print(
         "PRODUCTS FOUND:",
@@ -401,14 +614,14 @@ def ai_agent(request: AgentRequest):
     )
 
 
-    # -----------------------------------------------------
-    # STEP 5
-    # No products found
-    # -----------------------------------------------------
+    # =====================================================
+    # NO PRODUCTS
+    # =====================================================
 
     if not products:
 
         return {
+
             "success": True,
 
             "message": (
@@ -417,25 +630,12 @@ def ai_agent(request: AgentRequest):
             ),
 
             "products": []
+
         }
 
 
     # =====================================================
-    # OPTIMIZATION
-    # =====================================================
-    #
-    # Previously we made another Ollama request here:
-    #
-    # MongoDB products
-    #       ↓
-    #      Llama
-    #       ↓
-    # final response
-    #
-    # That second Llama request was unnecessary and
-    # increased the "Thinking..." time.
-    #
-    # Now we directly return the real MongoDB products.
+    # RETURN REAL PRODUCTS
     # =====================================================
 
     return {
@@ -448,6 +648,7 @@ def ai_agent(request: AgentRequest):
         ),
 
         "products": products
+
     }
 
 
@@ -462,6 +663,14 @@ def test_product_search(
 
     category: str = "",
 
+    use_case: str = "",
+
+    preference: str = "",
+
+    material: str = "",
+
+    capacity: str = "",
+
     max_price: float | None = None
 
 ):
@@ -472,9 +681,18 @@ def test_product_search(
 
         category=category,
 
+        use_case=use_case,
+
+        preference=preference,
+
+        material=material,
+
+        capacity=capacity,
+
         max_price=max_price
 
     )
+
 
     return {
 
