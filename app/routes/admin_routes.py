@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 
 from app.models.admin_model import AdminLogin
 from app.dependencies.admin_auth import get_current_admin
-
+from bson import ObjectId
 from app.database.mongodb import (
     admin_collection,
     products_collection,
@@ -320,4 +320,367 @@ def get_dashboard(
             "recent_orders":
                 recent_orders
         }
+    }
+    
+    
+    # Get all orders for admin
+@router.get("/orders")
+def get_all_orders(current_admin: dict = Depends(get_current_admin)):
+
+    pipeline = [
+        {
+            "$addFields": {
+                "user_object_id": {
+                    "$convert": {
+                        "input": "$user_id",
+                        "to": "objectId",
+                        "onError": None,
+                        "onNull": None
+                    }
+                }
+            }
+        },
+
+        {
+            "$lookup": {
+                "from": "users",
+                "localField": "user_object_id",
+                "foreignField": "_id",
+                "as": "customer"
+            }
+        },
+
+        {
+            "$unwind": {
+                "path": "$customer",
+                "preserveNullAndEmptyArrays": True
+            }
+        },
+
+        {
+            "$sort": {
+                "created_at": -1
+            }
+        }
+    ]
+
+    orders = list(
+        orders_collection.aggregate(pipeline)
+    )
+
+    admin_orders = []
+
+    for order in orders:
+
+        customer = order.get("customer", {})
+
+        admin_orders.append({
+            "order_id": order.get("order_id"),
+
+            "customer": {
+                "user_id": order.get("user_id"),
+                "name": customer.get("name"),
+                "email": customer.get("email"),
+                "phone": customer.get("phone"),
+                "address": customer.get("address"),
+                "city": customer.get("city"),
+                "pin": customer.get("pin"),
+            },
+
+            "items": [
+                {
+                    "product_id": item.get("product_id"),
+                    "name": item.get("name"),
+                    "image": item.get("image"),
+                    "quantity": item.get("quantity"),
+                    "price": item.get("price"),
+                }
+                for item in order.get("items", [])
+            ],
+
+            "subtotal": order.get("subtotal", 0),
+            "shipping": order.get("shipping", 0),
+            "total": order.get("total", 0),
+
+            "payment_status": order.get("payment_status"),
+            "order_status": order.get("order_status"),
+
+            "created_at": order.get("created_at"),
+        })
+
+    return {
+        "success": True,
+        "orders": admin_orders
+    }
+    
+    
+    # =====================================
+# ADMIN CUSTOMERS
+# =====================================
+
+@router.get("/customers")
+def get_all_customers(
+    current_admin: dict = Depends(get_current_admin)
+):
+
+    pipeline = [
+        {
+            "$lookup": {
+                "from": "orders",
+                "let": {
+                    "customer_id": {
+                        "$toString": "$_id"
+                    }
+                },
+                "pipeline": [
+                    {
+                        "$match": {
+                            "$expr": {
+                                "$eq": [
+                                    "$user_id",
+                                    "$$customer_id"
+                                ]
+                            }
+                        }
+                    }
+                ],
+                "as": "orders"
+            }
+        },
+
+        {
+            "$addFields": {
+                "total_orders": {
+                    "$size": "$orders"
+                },
+
+                "total_spent": {
+                    "$sum": {
+                        "$map": {
+                            "input": {
+                                "$filter": {
+                                    "input": "$orders",
+                                    "as": "order",
+                                    "cond": {
+                                        "$and": [
+                                            {
+                                                "$eq": [
+                                                    "$$order.payment_status",
+                                                    "paid"
+                                                ]
+                                            },
+                                            {
+                                                "$ne": [
+                                                    "$$order.order_status",
+                                                    "cancelled"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "as": "order",
+                            "in": {
+                                "$ifNull": [
+                                    "$$order.total",
+                                    0
+                                ]
+                            }
+                        }
+                    }
+                },
+
+                "last_order": {
+                    "$max": "$orders.created_at"
+                }
+            }
+        },
+
+        {
+            "$sort": {
+                "created_at": -1
+            }
+        }
+    ]
+
+    customers = list(
+        users_collection.aggregate(pipeline)
+    )
+
+    customer_list = []
+
+    for customer in customers:
+
+        customer_list.append({
+            "user_id": str(customer["_id"]),
+
+            "name": customer.get("name"),
+            "email": customer.get("email"),
+            "phone": customer.get("phone"),
+
+            "address": customer.get("address"),
+            "city": customer.get("city"),
+            "pin": customer.get("pin"),
+
+            "total_orders": customer.get(
+                "total_orders",
+                0
+            ),
+
+            "total_spent": customer.get(
+                "total_spent",
+                0
+            ),
+
+            "last_order": (
+                customer["last_order"].isoformat()
+                if isinstance(
+                    customer.get("last_order"),
+                    datetime
+                )
+                else None
+            ),
+
+            "created_at": (
+                customer["created_at"].isoformat()
+                if isinstance(
+                    customer.get("created_at"),
+                    datetime
+                )
+                else None
+            )
+        })
+
+    return {
+        "success": True,
+        "customers": customer_list
+    }
+
+
+# =====================================
+# CUSTOMER DETAILS + ORDERS
+# =====================================
+
+@router.get("/customers/{user_id}")
+def get_customer_details(
+    user_id: str,
+    current_admin: dict = Depends(get_current_admin)
+):
+
+    if not ObjectId.is_valid(user_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid customer ID"
+        )
+
+    customer = users_collection.find_one({
+        "_id": ObjectId(user_id)
+    })
+
+    if not customer:
+        raise HTTPException(
+            status_code=404,
+            detail="Customer not found"
+        )
+
+    orders = list(
+        orders_collection.find({
+            "user_id": user_id
+        }).sort(
+            "created_at",
+            -1
+        )
+    )
+
+    total_spent = 0
+
+    for order in orders:
+
+        if (
+            order.get("payment_status") == "paid"
+            and order.get("order_status") != "cancelled"
+        ):
+            total_spent += float(
+                order.get("total", 0)
+            )
+
+    customer_orders = []
+
+    for order in orders:
+
+        customer_orders.append({
+            "order_id": order.get("order_id"),
+
+            "items": [
+                {
+                    "product_id": item.get("product_id"),
+                    "name": item.get("name"),
+                    "image": item.get("image"),
+                    "price": item.get("price"),
+                    "quantity": item.get("quantity")
+                }
+                for item in order.get("items", [])
+            ],
+
+            "subtotal": order.get(
+                "subtotal",
+                0
+            ),
+
+            "shipping": order.get(
+                "shipping",
+                0
+            ),
+
+            "total": order.get(
+                "total",
+                0
+            ),
+
+            "payment_status": order.get(
+                "payment_status"
+            ),
+
+            "order_status": order.get(
+                "order_status"
+            ),
+
+            "created_at": (
+                order["created_at"].isoformat()
+                if isinstance(
+                    order.get("created_at"),
+                    datetime
+                )
+                else None
+            )
+        })
+
+    return {
+        "success": True,
+
+        "customer": {
+            "user_id": str(customer["_id"]),
+
+            "name": customer.get("name"),
+            "email": customer.get("email"),
+            "phone": customer.get("phone"),
+
+            "address": customer.get("address"),
+            "city": customer.get("city"),
+            "pin": customer.get("pin"),
+
+            "created_at": (
+                customer["created_at"].isoformat()
+                if isinstance(
+                    customer.get("created_at"),
+                    datetime
+                )
+                else None
+            ),
+
+            "total_orders": len(orders),
+            "total_spent": total_spent
+        },
+
+        "orders": customer_orders
     }
