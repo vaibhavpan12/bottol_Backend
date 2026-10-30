@@ -24,7 +24,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://bottol-steel.vercel.app",
+        "https://pivoraai.vercel.app/",
     ],
     allow_credentials=True,
     allow_methods=["*"],
