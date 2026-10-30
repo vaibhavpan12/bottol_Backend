@@ -20,12 +20,26 @@ app = FastAPI(
 # CORS
 # =========================
 
+# Add your live domains in Render -> Environment -> ALLOWED_ORIGINS
+# as a comma-separated list, e.g.
+#   https://www.yourdomain.com,https://yourdomain.com
+DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://pivoraai.vercel.app",
+]
+
+extra_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://pivoraai.vercel.app",
-    ],
+    allow_origins=DEFAULT_ORIGINS + extra_origins,
+    # also allow every Vercel preview deployment of the frontend
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,6 +80,11 @@ app.include_router(user_router)
 app.include_router(cart_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 @app.get("/")
 def root():
     return {

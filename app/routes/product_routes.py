@@ -219,6 +219,8 @@ async def create_product(
     material: str | None = Form(None),
     capacity: str | None = Form(None),
     weight: str | None = Form(None),
+    description: str | None = Form(None),
+    brand: str | None = Form(None),
 
     use_cases: str = Form("[]"),
     features: str = Form("[]"),
@@ -329,6 +331,8 @@ async def create_product(
         "material": material,
         "capacity": capacity,
         "weight": weight,
+        "description": description or "",
+        "brand": brand or "",
 
         "use_cases": use_cases_list,
         "features": features_list
@@ -435,6 +439,8 @@ async def update_product(
     material: str | None = Form(None),
     capacity: str | None = Form(None),
     weight: str | None = Form(None),
+    description: str | None = Form(None),
+    brand: str | None = Form(None),
 
     use_cases: str = Form("[]"),
     features: str = Form("[]"),
@@ -566,6 +572,12 @@ async def update_product(
         "use_cases": use_cases_list,
         "features": features_list
     }
+
+    # only overwrite these when the form sends them
+    if description is not None:
+        updated_data["description"] = description
+    if brand is not None:
+        updated_data["brand"] = brand
 
     # =====================================
     # UPDATE MONGODB

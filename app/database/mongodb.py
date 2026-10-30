@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MONGO_URI = os.getenv("MONGO_URI")
-print("MONGO_URI:", MONGO_URI)
+# (don't print the connection string — it contains your password)
 
 client = MongoClient(
     MONGO_URI,
